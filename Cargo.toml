@@ -1,0 +1,10 @@
+[package]
+name = "lokibot-c2-analysis"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+encoding_rs = "0.8.35"
+num_enum = "0.7.3"
+rocket = "0.5.1"
