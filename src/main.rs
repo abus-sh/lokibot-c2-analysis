@@ -1,3 +1,4 @@
+use encoding::Response;
 use packets::Packet;
 
 #[macro_use] extern crate rocket;
@@ -11,12 +12,12 @@ fn index() -> &'static str {
 }
 
 #[post("/controllers/user/fre.php", data = "<input>")]
-async fn handle_fre_packet(input: Vec<u8>) -> &'static str {
+async fn handle_fre_packet(input: Vec<u8>) -> Vec<u8> {
     let packet = if let Ok(packet) = Packet::try_from(input.as_slice()) {
         packet
     } else {
         println!("Unknown packet:\n{:?}", input);
-        return "UNKNOWN PACKET";
+        return vec![0, 1, 2];
     };
 
     match packet {
@@ -31,12 +32,10 @@ async fn handle_fre_packet(input: Vec<u8>) -> &'static str {
             println!("Received a packet:\n{:?}", other);
         },
     }
-
-    // First 4 bytes as a LE u32 must be greater than 8
-
-    // Before loop
-    //       v
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    
+    //  Header |num commands   |?              |opcode       |ignored        |string               |?              |opcode         |ignored        |string
+    //"\x11\"3D\x02\x00\x00\x00\x00\x00\x00\x00\n\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00hi\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00hi!\x00"
+    Response::default().into()
 }
 
 #[launch]
