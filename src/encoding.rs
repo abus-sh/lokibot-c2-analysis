@@ -110,8 +110,8 @@ impl From<Response> for Vec<u8> {
     fn from(value: Response) -> Self {
         let mut response = Vec::new();
 
-        // Write the header byte
-        response.write(&[8, 0, 0, 0])
+        // Write a temporary byte, this will later be replaced with the length
+        response.write(&[9, 0, 0, 0])
             .expect("unable to write response");
 
         // Write the number of commands
@@ -124,6 +124,10 @@ impl From<Response> for Vec<u8> {
             response.write(&bytes).expect("unable to write response");
         }
 
+        // Copy the final length
+        let len: [u8; 4] = (response.len() as u32).to_le_bytes();
+        response[..4].clone_from_slice(&len);
+
         response
     }
 }
@@ -134,11 +138,12 @@ impl TryFrom<&mut &[u8]> for Response {
     fn try_from(value: &mut &[u8]) -> Result<Self, Self::Error> {
         let mut buf = [0u8; 4];
 
-        // Read the first word, make sure it's >= 8
+        // Read the length, make sure we have at least that many bytes
         if let Err(_e) = value.read_exact(&mut buf) {
             return Err(());
         }
-        if u32::from_le_bytes(buf) < 8 {
+        // +4 to account for the 4 bytes already read
+        if (u32::from_le_bytes(buf) as usize) > value.len() + 4 {
             return Err(());
         }
 
@@ -550,7 +555,7 @@ mod test {
         };
         let bytes: Vec<u8> = response.into();
         assert_eq!(bytes, &[
-            8, 0, 0, 0, // Header byte
+            8, 0, 0, 0, // Length
             0, 0, 0, 0, // Number of commands
         ], "no-op response not encoded properly");
 
@@ -568,20 +573,20 @@ mod test {
         };
         let bytes: Vec<u8> = response.into();
         assert_eq!(bytes, &[
-            8, 0, 0, 0, // Header byte
-            2, 0, 0, 0, // Number of commands
+            44, 0, 0, 0,    // Length
+            2, 0, 0, 0,     // Number of commands
 
-            0, 0, 0, 0, // Ignored word
-            8, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            3, 0, 0, 0, // Arg length + null byte
-            97, 98, 0,  // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            8, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            3, 0, 0, 0,     // Arg length + null byte
+            97, 98, 0,      // The arg + null byte
             
-            0, 0, 0, 0, // Ignored word
-            0, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            1, 0, 0, 0, // Arg length + null byte
-            0,          // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            0, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            1, 0, 0, 0,     // Arg length + null byte
+            0,              // The arg + null byte
         ], "normal response not encoded properly");
     }
 
@@ -592,62 +597,55 @@ mod test {
             .expect_err("empty bytes allowed");
 
         let bytes = [
-            8, 0, 0, 0, // Header byte
+            8, 0, 0, 0, // Length
             1, 0, 0, 0, // Number of commands
         ];
         let _ = <&mut &[u8] as TryInto<Response>>::try_into(&mut bytes.as_slice())
-            .expect_err("long length allowed");
+            .expect_err("long number of commands allowed");
 
         let bytes = [
-            8, 0, 0, 0, // Header byte
+            7, 0, 0, 0, // Length
             0, 0, 0,    // Number of commands
         ];
         let _ = <&mut &[u8] as TryInto<Response>>::try_into(&mut bytes.as_slice())
             .expect_err("truncated header allowed");
 
         let bytes = [
-            8, 0, 0, 0, // Header byte
-            2, 0, 0, 0, // Number of commands
+            31, 0, 0, 0,    // Length
+            2, 0, 0, 0,     // Number of commands
 
-            0, 0, 0, 0, // Ignored word
-            8, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            3, 0, 0, 0, // Arg length + null byte
-            97, 98, 0,  // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            8, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            3, 0, 0, 0,     // Arg length + null byte
+            97, 98, 0,      // The arg + null byte
             
-            0, 0, 0, 0, // Ignored word
+            0, 0, 0, 0,     // Ignored word
         ];
         let _ = <&mut &[u8] as TryInto<Response>>::try_into(&mut bytes.as_slice())
             .expect_err("truncated data allowed");
 
         let bytes = [
-            7, 0, 0, 0, // Header byte (invalid)
-            0, 0, 0, 0, // Number of commands
-        ];
-        let _ = <&mut &[u8] as TryInto<Response>>::try_into(&mut bytes.as_slice())
-            .expect_err("invalid header word allowed");
+            44, 0, 0, 0,    // Length
+            3, 0, 0, 0,     // Number of commands (too long)
 
-        let bytes = [
-            8, 0, 0, 0, // Header byte
-            3, 0, 0, 0, // Number of commands (too long)
-
-            0, 0, 0, 0, // Ignored word
-            8, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            3, 0, 0, 0, // Arg length + null byte
-            97, 98, 0,  // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            8, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            3, 0, 0, 0,     // Arg length + null byte
+            97, 98, 0,      // The arg + null byte
             
-            0, 0, 0, 0, // Ignored word
-            0, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            1, 0, 0, 0, // Arg length + null byte
-            0,          // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            0, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            1, 0, 0, 0,     // Arg length + null byte
+            0,              // The arg + null byte
         ];
         let _ = <&mut &[u8] as TryInto<Response>>::try_into(&mut bytes.as_slice())
             .expect_err("long length allowed");
 
         let bytes = [
-            8, 0, 0, 0, // Header byte
+            8, 0, 0, 0, // Length
             0, 0, 0, 0, // Number of commands
         ];
         let response: Response = (&mut bytes.as_slice()).try_into()
@@ -657,20 +655,20 @@ mod test {
         }, "empty response not decoded properly");
 
         let bytes = [
-            8, 0, 0, 0, // Header byte
-            2, 0, 0, 0, // Number of commands
+            44, 0, 0, 0,    // Length
+            2, 0, 0, 0,     // Number of commands
 
-            0, 0, 0, 0, // Ignored word
-            8, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            3, 0, 0, 0, // Arg length + null byte
-            97, 98, 0,  // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            8, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            3, 0, 0, 0,     // Arg length + null byte
+            97, 98, 0,      // The arg + null byte
             
-            0, 0, 0, 0, // Ignored word
-            0, 0, 0, 0, // Opcode (le)
-            0, 0, 0, 0, // Ignored word
-            1, 0, 0, 0, // Arg length + null byte
-            0,          // The arg + null byte
+            0, 0, 0, 0,     // Ignored word
+            0, 0, 0, 0,     // Opcode (le)
+            0, 0, 0, 0,     // Ignored word
+            1, 0, 0, 0,     // Arg length + null byte
+            0,              // The arg + null byte
         ];
         let response: Response = (&mut bytes.as_slice()).try_into()
             .expect("normal response not decoded");
