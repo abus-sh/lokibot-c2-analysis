@@ -175,10 +175,10 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn new(opcode: OpCode, arg: String) -> Self {
+    pub fn new(opcode: OpCode, arg: &str) -> Self {
         Self {
             opcode,
-            arg,
+            arg: String::from(arg),
         }
     }
 }
